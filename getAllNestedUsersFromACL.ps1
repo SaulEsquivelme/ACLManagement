@@ -1,22 +1,53 @@
-#ACL data collection
-$shares = Get-Content "\\companydomain.com\Folder1\Folder2"
-$out_arr = @()
+# Define the shared drive path
+$sharedDrivePath = "\\companydomain.com\Folder1\Folder2"
 
-foreach ($share in $shares){
-    if ($share -like "\\*"){
-        $share
-        if (Test-Path $share){
-            $shareString = $share.Split("\")
-            $shareFolder = $shareString[-2] + "_" + $shareString[-1] + ".csv"
-            $acl = Get-Acl $share
-            $acl.Access | Export-Csv $shareFolder
-        }
-        else{
-            $out_arr += $share
-        }
-    }
-    else{
-        Write-Host "No valid path: "$share
+# Get the ACL from the shared drive
+$acl = Get-Acl -Path $sharedDrivePath
+
+$regex = "OU=([^,]+)"
+
+# Function to get members of a group
+function Get-GroupMembers {
+    param (
+        [string]$groupName
+    )
+    try {
+        $group = Get-ADGroup -Identity $groupName
+        $members = Get-ADGroupMember -Identity $groupName
+        return $members
+    } catch {
+        $members = Get-ADGroup -identity $groupName -Properties Members | Select-Object -ExpandProperty Members | Get-ADObject
+        return $members
     }
 }
-$out_arr 
+
+function Is-Group {
+    param (
+        [string]$identity
+    )
+    try {
+        $group = Get-ADGroup -Identity $identity -ErrorAction Stop
+        return $true
+    } catch {
+        return $false
+    }
+}
+
+
+# Iterate through the ACL entries
+foreach ($access in $acl.Access) {
+    $identityReference = $access.IdentityReference
+    $identityName = $identityReference.Value.Substring(6)
+    if (Is-group -identity $identityName){
+        Write-Host "Group: $identityReference"
+        $members = Get-GroupMembers -groupName $identityName
+        foreach ($member in $members) {
+            if ($member -match $regex){
+                $ou = $matches[1]
+            }
+            Write-Host "MemberName: $($member.Name), OU:$($ou)"
+        }
+    } else {
+        Write-Host "User: $identityReference"
+    }
+} 
